@@ -3,9 +3,11 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from torch.utils.data import random_split
 from tusimple_dataset import TuSimpleLaneDataset  # Our custom dataset class
 from model import TinyCNN  # Our binary segmentation model
 from model import BiggerCNN
+from model import UNet
 import os
 
 
@@ -40,11 +42,21 @@ MASK_DIR = os.path.join("..", "TuSimple", "processed", "masks")
 
 # Create dataset and dataloader
 dataset = TuSimpleLaneDataset(IMAGE_DIR, MASK_DIR)
-dataloader = DataLoader(dataset, batch_size=8, shuffle=True)
+print("Total samples in dataset:", len(dataset))
+
+# Split into 80% train and 20% validation
+train_size = int(0.8 * len(dataset))
+val_size = len(dataset) - train_size
+train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+
+# Dataloaders
+train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True)
+val_loader = DataLoader(val_dataset, batch_size=8, shuffle=False)
 
 # Initialize the model and move it to GPU (or CPU fallback)
 # model = TinyCNN().to(device)
-model = BiggerCNN().to(device)
+# model = BiggerCNN().to(device)
+model = UNet().to(device)
 
 # Define loss function: Binary Cross Entropy for pixel-wise binary classification
 criterion = combined_loss
@@ -53,27 +65,42 @@ criterion = combined_loss
 optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
 # Number of epochs to train
-EPOCHS = 1000
+EPOCHS = 100
 
 # Training loop
 for epoch in range(EPOCHS):
-    model.train()  # Set model to training mode
+    model.train()
     total_loss = 0
 
-    for images, masks in dataloader:
-        images = images.to(device)  # Move input images to GPU
-        masks = masks.to(device)    # Move ground truth masks to GPU
+    for images, masks in train_loader:
+        images = images.to(device)
+        masks = masks.to(device)
 
-        optimizer.zero_grad()       # Clear previous gradients
-        outputs = model(images)     # Forward pass
-        loss = criterion(outputs, masks)  # Compare predictions to ground truth
-        loss.backward()             # Backpropagation: compute gradients
-        optimizer.step()            # Update model weights
+        optimizer.zero_grad()
+        outputs = model(images)
+        loss = criterion(outputs, masks)
+        loss.backward()
+        optimizer.step()
 
         total_loss += loss.item()
 
-    # Print loss for this epoch
-    print(f"Epoch [{epoch + 1}/{EPOCHS}] Loss: {total_loss / len(dataloader):.4f}")
+    avg_train_loss = total_loss / len(train_loader)
+
+    # Validation
+    model.eval()
+    val_loss = 0.0
+    with torch.no_grad():
+        for images, masks in val_loader:
+            images = images.to(device)
+            masks = masks.to(device)
+            outputs = model(images)
+            loss = criterion(outputs, masks)
+            val_loss += loss.item()
+
+    avg_val_loss = val_loss / len(val_loader)
+
+    print(f"Epoch [{epoch+1}/{EPOCHS}] Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
+
 
 # Save the trained model weights
 torch.save(model.state_dict(), "lane_model.pth")

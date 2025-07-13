@@ -4,9 +4,10 @@ import matplotlib.pyplot as plt
 from tusimple_dataset import TuSimpleLaneDataset
 from model import TinyCNN
 from model import BiggerCNN
+from model import UNet
 
 # Load trained model
-model = BiggerCNN()
+model = UNet()
 model.load_state_dict(torch.load("lane_model.pth", map_location=torch.device('cpu')))
 model.eval()
 
