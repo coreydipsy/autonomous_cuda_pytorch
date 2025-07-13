@@ -4,6 +4,7 @@ import torch
 import numpy as np
 from torch.utils.data import Dataset
 from torchvision import transforms
+from PIL import Image
 
 # Custom Dataset class to load images and corresponding binary lane masks
 class TuSimpleLaneDataset(Dataset):
@@ -16,7 +17,8 @@ class TuSimpleLaneDataset(Dataset):
         self.image_filenames = [f for f in os.listdir(image_dir) if f.endswith('.jpg')]
 
         # If a transform is passed, use it. Otherwise, use default: convert image to tensor
-        self.transform = transform or transforms.Compose([
+        self.transform = transform
+        self.default_transform = transforms.Compose([
             transforms.ToTensor(),  # Converts (H, W, C) uint8 image to (C, H, W) float in [0.0, 1.0]
         ])
 
@@ -37,19 +39,31 @@ class TuSimpleLaneDataset(Dataset):
         if image is None or mask is None:
             raise RuntimeError(f"Could not load {img_path} or {mask_path}")
 
-        # Resize both image and mask to the target input size of the model (64x64)
-        image = cv2.resize(image, (128, 128))
-        mask = cv2.resize(mask, (128, 128))
+        # Resize both image and mask to the target input size of the model (128x128)
+        image = cv2.resize(image, (256, 256))
+        mask = cv2.resize(mask, (256, 256))
 
-        # Apply transformation to image (e.g., convert to tensor)
-        image = self.transform(image)
+        # Apply augmentation if provided
+        # If using albumentations
+        if self.transform:
+            augmented = self.transform(image=image, mask=mask)
+            image = augmented['image']
+            mask = augmented['mask']
+            
+            mask = mask.float() / 255.0
+            if mask.ndim == 2:
+                mask = mask.unsqueeze(0)
+        else:
+            # Apply default image transformation (ToTensor)
+            image = self.default_transform(image)
 
-        # Convert mask from NumPy array to PyTorch tensor
-        # - float(): convert from uint8 to float32
-        # - unsqueeze(0): add channel dimension to make shape (1, 64, 64)
-        # - / 255.0: normalize binary values to 0.0 or 1.0
-        mask = mask.astype(np.float32) / 255.0  # Normalize to [0, 1]
-        mask = torch.from_numpy(mask).unsqueeze(0)  # Add channel dimension
+            # Convert mask from NumPy array to PyTorch tensor
+            # - float(): convert from uint8 to float32
+            # - unsqueeze(0): add channel dimension to make shape (1, 128, 128)
+            # - / 255.0: normalize binary values to 0.0 or 1.0
+            mask = mask.astype(np.float32) / 255.0
+            mask = torch.from_numpy(mask).unsqueeze(0)
 
         # Return a tuple of (input image tensor, label mask tensor)
         return image, mask
+

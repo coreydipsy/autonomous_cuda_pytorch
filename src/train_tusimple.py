@@ -8,7 +8,18 @@ from tusimple_dataset import TuSimpleLaneDataset  # Our custom dataset class
 from model import TinyCNN  # Our binary segmentation model
 from model import BiggerCNN
 from model import UNet
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
+
 import os
+
+train_transform = A.Compose([
+    A.HorizontalFlip(p=0.5),
+    A.RandomBrightnessContrast(p=0.3),
+    A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.1, rotate_limit=5, p=0.4),
+    A.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
+    ToTensorV2()
+])
 
 
 def dice_loss(pred, target, smooth=1e-6):
@@ -40,16 +51,37 @@ print(f"Using device: {device}")
 IMAGE_DIR = os.path.join("..", "TuSimple", "processed", "images")
 MASK_DIR = os.path.join("..", "TuSimple", "processed", "masks")
 
-# Create dataset and dataloader
-dataset = TuSimpleLaneDataset(IMAGE_DIR, MASK_DIR)
-print("Total samples in dataset:", len(dataset))
+
+
+
+# Create training and validation datasets using transforms
+full_dataset = TuSimpleLaneDataset(IMAGE_DIR, MASK_DIR)
 
 # Split into 80% train and 20% validation
-train_size = int(0.8 * len(dataset))
-val_size = len(dataset) - train_size
-train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+train_size = int(0.8 * len(full_dataset))
+val_size = len(full_dataset) - train_size 
 
-# Dataloaders
+# Get consistent filenames
+all_indices = list(range(len(full_dataset)))
+train_indices = all_indices[:train_size]
+val_indices = all_indices[train_size:]
+
+# Split filenames for consistency
+train_image_filenames = [full_dataset.image_filenames[i] for i in train_indices]
+val_image_filenames = [full_dataset.image_filenames[i] for i in val_indices]
+
+# Now rebuild datasets using image_filenames manually
+train_dataset = TuSimpleLaneDataset(IMAGE_DIR, MASK_DIR, transform=train_transform)
+train_dataset.image_filenames = train_image_filenames  # overwrite with selected subset
+
+val_transform = A.Compose([
+    A.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
+    ToTensorV2()
+])
+val_dataset = TuSimpleLaneDataset(IMAGE_DIR, MASK_DIR, transform=val_transform)
+val_dataset.image_filenames = val_image_filenames
+
+# Now create DataLoaders
 train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=8, shuffle=False)
 
